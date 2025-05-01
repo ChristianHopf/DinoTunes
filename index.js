@@ -5,6 +5,7 @@ const {
   GatewayIntentBits,
   SlashCommandBuilder,
 } = require("discord.js");
+const { joinVoiceChannel } = require("@discordjs/voice");
 
 const client = new Client({
   intents: [
@@ -15,117 +16,52 @@ const client = new Client({
   ],
 });
 
-// client.lavalink = new LavalinkManager({
-//   nodes: [
-//     {
-//       authorization: "password",
-//       host: "localhost",
-//       port: 2333,
-//       id: "testnode",
-//       requestSignalTimeoutMS: 3000,
-//       closeOnError: true,
-//       heartBeatInterval: 30_000,
-//       enablePingOnStatsCheck: true,
-//       retryDelay: 10e3,
-//       secure: false,
-//       retryAmount: 5,
-//     },
-//   ],
-//   sendToShard: (guildId, payload) =>
-//     client.guilds.cache.get(guildId)?.shard?.send(payload),
-//   autoSkip: true,
-//   client: {
-//     id: process.env.CLIENT_ID,
-//     username: "DinoTunes",
-//   },
-//   autoSkipOnResolveError: true,
-//   emitNewSongsOnly: true,
-//   playerOptions: {
-//     maxErrorsPerTime: { threshold: 10_000, maxAmount: 3 },
-//   },
-// });
+// create lavalink client
 client.lavalink = new LavalinkManager({
   nodes: [
-      {
-          authorization: "password",
-          host: "localhost",
-          port: 2333,
-          id: "testnode",
-          // get the previously used session, to restart with "resuming" enabled
-          sessionId: previouslyUsedSessions.get("testnode"),
-          requestSignalTimeoutMS: 3000,
-          closeOnError: true,
-          heartBeatInterval: 30_000,
-          enablePingOnStatsCheck: true,
-          retryDelay: 10e3,
-          secure: false,
-          retryAmount: 5,
-      }
+    {
+      // Important to have at least 1 node
+      authorization: "password",
+      host: "localhost",
+      port: 2333,
+      id: "testnode",
+    },
   ],
-  sendToShard: (guildId, payload) => client.guilds.cache.get(guildId)?.shard?.send(payload),
-  autoSkip: true,
-  client: { // client: client.user
-      id: envConfig.clientId, // REQUIRED! (at least after the .init)
-      username: "TESTBOT",
+  sendToShard: (guildId, payload) =>
+    client.guilds.cache.get(guildId)?.shard?.send(payload),
+  client: {
+    id: process.env.CLIENT_ID,
+    username: "DinoTunes",
   },
-  autoSkipOnResolveError: true, // skip song, if resolving an unresolved song fails
-  emitNewSongsOnly: true, // don't emit "looping songs"
+  // everything down below is optional
+  autoSkip: true,
   playerOptions: {
-      // These are the default prevention methods
-      maxErrorsPerTime: {
-          threshold: 10_000,
-          maxAmount: 3,
-      },
-      // only allow an autoplay function to execute, if the previous function was longer ago than this number.
-      minAutoPlayMs: 10_000,
-
-      applyVolumeAsFilter: false,
-      clientBasedPositionUpdateInterval: 50, // in ms to up-calc player.position
-      defaultSearchPlatform: "ytmsearch",
-      volumeDecrementer: 0.75, // on client 100% == on lavalink 75%
-      requesterTransformer: requesterTransformer,
-      onDisconnect: {
-          autoReconnect: true, // automatically attempts a reconnect, if the bot disconnects from the voice channel, if it fails, it get's destroyed
-          destroyPlayer: false // overrides autoReconnect and directly destroys the player if the bot disconnects from the vc
-      },
-      onEmptyQueue: {
-          // will auto destroy the player after 30s if the queue got empty and autoplay function does not add smt to the queue
-          destroyAfterMs: 30_000, // 1 === instantly destroy | don't provide the option, to don't destroy the player
-          autoPlayFunction: autoPlayFunction,
-      },
-      useUnresolvedData: true,
+    clientBasedPositionUpdateInterval: 150,
+    defaultSearchPlatform: "ytmsearch",
+    volumeDecrementer: 0.75,
+    //requesterTransformer: requesterTransformer,
+    onDisconnect: {
+      autoReconnect: true,
+      destroyPlayer: false,
+    },
+    onEmptyQueue: {
+      destroyAfterMs: 30_000,
+      //autoPlayFunction: autoPlayFunction,
+    },
   },
   queueOptions: {
-      maxPreviousTracks: 10,
-      // only needed if you want and need external storage, don't provide if you don't need to
-      queueStore: new myCustomStore(client.redis), // client.redis = new redis()
-      // only needed, if you want to watch changes in the queue via a custom class,
-      queueChangesWatcher: new myCustomWatcher(client)
+    maxPreviousTracks: 25,
   },
-  linksAllowed: true,
-  // example: don't allow p*rn / youtube links., you can also use a regex pattern if you want.
-  // linksBlacklist: ["porn", "youtube.com", "youtu.be"],
-  linksBlacklist: [],
-  linksWhitelist: [],
-  advancedOptions: {
-      enableDebugEvents: true,
-      maxFilterFixDuration: 600_000, // only allow instafixfilterupdate for tracks sub 10mins
-      debugOptions: {
-          noAudio: false,
-          playerDestroy: {
-              dontThrowError: false,
-              debugLog: false,
-          },
-          logCustomSearches: false,
-      }
-  }
 });
 
 client.on("raw", (d) => client.lavalink.sendRawData(d));
 
-// Register slash commands
-client.once("ready", async () => {
+// above the lavalinkManager + client were created
+client.on("raw", (d) => client.lavalink.sendRawData(d));
+client.on("ready", async () => {
   console.log(`Logged in as ${client.user?.tag}`);
+  await client.lavalink.init({ ...client.user });
+
   const commands = [
     new SlashCommandBuilder()
       .setName("play")
@@ -147,6 +83,30 @@ client.once("ready", async () => {
   await client.application?.commands.set(commands);
 });
 
+// Register slash commands
+// client.once("ready", async () => {
+//   console.log(`Logged in as ${client.user?.tag}`);
+//   const commands = [
+//     new SlashCommandBuilder()
+//       .setName("play")
+//       .setDescription("Play a song from YouTube or SoundCloud")
+//       .addStringOption((option) =>
+//         option
+//           .setName("query")
+//           .setDescription("Song name or URL")
+//           .setRequired(true)
+//       ),
+//     new SlashCommandBuilder()
+//       .setName("stop")
+//       .setDescription("Stop the music and clear the queue"),
+//     new SlashCommandBuilder()
+//       .setName("join")
+//       .setDescription("Join a voice channel"),
+//   ];
+
+//   await client.application?.commands.set(commands);
+// });
+
 // Handle slash commands
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isCommand()) return;
@@ -162,9 +122,21 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    const player = client.lavalink.createPlayer(interaction.guildId);
+    // Join channel
+    const connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: interaction.guild.id,
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+    });
+
+    // Start player
+    const player = client.lavalink.createPlayer({
+      guildId: interaction.guildId,
+      voiceChannelId: voiceChannel.id,
+    });
+
     await player.connect(voiceChannel.id, { deaf: true });
-    await interaction.reply(`Joined ${voiceChannel.name}`);
+    await interaction.channel.send(`Joined ${voiceChannel.name}`);
   }
 
   if (commandName === "play") {
@@ -184,10 +156,13 @@ client.on("interactionCreate", async (interaction) => {
       await player.connect(voiceChannel.id, { deaf: true });
     }
 
-    const searchResult = await client.lavalink.search(
-      { query, source: query.includes("soundcloud.com") ? "sc" : "yt" },
+    const searchResult = await player.search(
+      // { query, source: query.includes("soundcloud.com") ? "sc" : "yt" },
+      // { query, source: "ytsearch" },
+      query,
       interaction.user
     );
+    console.log(searchResult);
     if (!searchResult.tracks.length) {
       await interaction.reply("No results found!");
       return;
